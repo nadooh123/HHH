@@ -19,7 +19,7 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Extract Zip and Fix Build Configs
+    - name: Extract Zip and Build
       run: |
         echo "Extracting zip file..."
         mkdir -p extracted_folder
@@ -35,74 +35,40 @@ jobs:
         echo "Found project at: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         
-        # --- معالجة ملف settings.gradle.kts بشكل آمن ---
-        echo "Processing settings.gradle.kts safely..."
-        SETTINGS_FILE="settings.gradle.kts"
-        if [ ! -f "$SETTINGS_FILE" ]; then
-          # إنشاء الملف إذا لم يكن موجوداً
-          cat <<'EOF' > "$SETTINGS_FILE"
-        pluginManagement {
+        # إنشاء ملف init.gradle لإصلاح توافق JVM Target بطريقة آمنة
+        # هذا الملف يعمل على مستوى Gradle نفسه ولا يتعارض مع صيغة المشروع
+        echo "Creating init.gradle to fix JVM target compatibility..."
+        cat <<'EOF' > init.gradle
+        initscript {
             repositories {
-                google()
                 mavenCentral()
-                gradlePluginPortal()
+                google()
+            }
+            dependencies {
+                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0")
             }
         }
-        dependencyResolutionManagement {
-            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
-        rootProject.name = "MyApp"
-        include(":app")
-        EOF
-          echo "Created new $SETTINGS_FILE"
-        else
-          # التحقق مما إذا كان البلوك موجوداً
-          if ! grep -q "pluginManagement" "$SETTINGS_FILE"; then
-            echo "Adding pluginManagement block to the beginning of $SETTINGS_FILE"
-            # استخدام ملف مؤقت لإدراج البلوك في البداية
-            cat <<'EOF' > /tmp/plugin_management_block.txt
-        pluginManagement {
-            repositories {
-                google()
-                mavenCentral()
-                gradlePluginPortal()
-            }
-        }
-        EOF
-            cat /tmp/plugin_management_block.txt "$SETTINGS_FILE" > /tmp/settings_temp && mv /tmp/settings_temp "$SETTINGS_FILE"
-          else
-            echo "pluginManagement block already exists. Skipping addition."
-          fi
-        fi
-        
-        # --- إصلاح توافق JVM (لضمان عدم عودة الخطأ القديم) ---
-        echo "Applying JVM target compatibility fix..."
-        cat <<'EOF' >> build.gradle.kts
-        subprojects {
-            afterEvaluate { project ->
-                if (project.hasProperty('android')) {
-                    project.android {
-                        compileOptions {
-                            sourceCompatibility JavaVersion.VERSION_17
-                            targetCompatibility JavaVersion.VERSION_17
+
+        allprojects {
+            afterEvaluate {
+                tasks.configureEach {
+                    if (it.class.name.contains("org.jetbrains.kotlin.gradle.tasks.KotlinCompile")) {
+                        kotlinOptions {
+                            jvmTarget = "17"
                         }
                     }
                 }
-                tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-                    kotlinOptions {
-                        jvmTarget = "17"
-                    }
-                }
+            }
+            tasks.withType(JavaCompile).configureEach {
+                sourceCompatibility = '17'
+                targetCompatibility = '17'
             }
         }
         EOF
         
         chmod +x gradlew
-        ./gradlew assembleDebug
+        # تشغيل البناء باستخدام ملف init.gradle
+        ./gradlew assembleDebug -I init.gradle
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
