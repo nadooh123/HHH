@@ -35,31 +35,62 @@ jobs:
         echo "Found project at: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         
-        # 1. إضافة الخاصية إلى gradle.properties كإجراء احتياطي (لتجاهل التحقق)
-        echo "kotlin.jvm.target.validation.mode = IGNORE" >> gradle.properties
+        # 1. إضافة خاصية تجاهل التحقق من توافق JVM إلى gradle.properties
+        if [ -f "gradle.properties" ]; then
+          echo "kotlin.jvm.target.validation.mode = IGNORE" >> gradle.properties
+        else
+          echo "kotlin.jvm.target.validation.mode = IGNORE" > gradle.properties
+        fi
         
-        # 2. إضافة بلوك subprojects إلى build.gradle الرئيسي لفرض الإصدار 17
-        # هذا البلوك يضمن تطبيق الإعدادات على جميع المشاريع الفرعية والتبعيات
-        cat <<'EOF' >> build.gradle
+        # 2. تعديل ملف settings.gradle.kts لإضافة pluginManagement الصحيح
+        SETTINGS_FILE="settings.gradle.kts"
+        if [ ! -f "$SETTINGS_FILE" ]; then
+          SETTINGS_FILE="settings.gradle"
+        fi
+        
+        if [ -f "$SETTINGS_FILE" ]; then
+          echo "Patching $SETTINGS_FILE to add pluginManagement repositories..."
+          # إضافة مستودعات pluginManagement إذا لم تكن موجودة
+          if ! grep -q "pluginManagement" "$SETTINGS_FILE"; then
+            cat <<'EOF' > /tmp/plugin_mgmt.txt
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+        EOF
+            cat /tmp/plugin_mgmt.txt "$SETTINGS_FILE" > /tmp/settings_temp && mv /tmp/settings_temp "$SETTINGS_FILE"
+          fi
+        fi
+        
+        # 3. تعديل ملف build.gradle.kts الرئيسي لفرض إصدار 17 على كل المشاريع الفرعية
+        # هذا الكود مكتوب بصيغة Kotlin DSL ليتوافق مع ملفات .kts
+        echo "Patching root build.gradle.kts for JVM target compatibility..."
+        cat <<'EOF' >> build.gradle.kts
         subprojects {
-            afterEvaluate { project ->
-                if (project.hasProperty('android')) {
-                    project.android {
+            afterEvaluate {
+                if (plugins.hasPlugin("com.android.application") || plugins.hasPlugin("com.android.library")) {
+                    extensions.configure<com.android.build.gradle.BaseExtension> {
                         compileOptions {
-                            sourceCompatibility JavaVersion.VERSION_17
-                            targetCompatibility JavaVersion.VERSION_17
+                            sourceCompatibility = JavaVersion.VERSION_17
+                            targetCompatibility = JavaVersion.VERSION_17
                         }
                     }
                 }
-                if (project.hasProperty('kotlinOptions')) {
-                    project.kotlinOptions.jvmTarget = "17"
+                tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+                    kotlinOptions {
+                        jvmTarget = "17"
+                    }
                 }
             }
         }
         EOF
         
         chmod +x gradlew
-        ./gradlew assembleDebug
+        # تشغيل البناء وتجاهل التحقق من توافق JVM كإجراء احتياطي إضافي
+        ./gradlew assembleDebug -Dkotlin.jvm.target.validation.mode=IGNORE
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
