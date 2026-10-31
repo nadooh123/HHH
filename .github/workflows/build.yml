@@ -35,38 +35,37 @@ jobs:
         echo "Found project at: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         
-        # إنشاء ملف init.gradle لإصلاح توافق JVM Target
-        # تم استخدام initscript + afterEvaluate لضمان الوصول الآمن لفئة KotlinCompile
-        cat <<'EOF' > init.gradle
-        initscript {
-            repositories {
-                mavenCentral()
-                google()
-            }
-            dependencies {
-                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0")
-            }
-        }
+        # --- بدء التعديل التلقائي على build.gradle ---
+        echo "Applying fix for JVM target compatibility..."
+        # إضافة الإعدادات إلى build.gradle الرئيسي
+        cat <<'EOF' >> build.gradle
 
-        allprojects {
-            afterEvaluate {
-                tasks.configureEach {
-                    if (it.class.name.contains("org.jetbrains.kotlin.gradle.tasks.KotlinCompile")) {
-                        kotlinOptions {
-                            jvmTarget = "17"
+        // Fix for JVM target compatibility
+        subprojects {
+            afterEvaluate { project ->
+                if (project.hasProperty('android')) {
+                    project.android {
+                        compileOptions {
+                            sourceCompatibility JavaVersion.VERSION_17
+                            targetCompatibility JavaVersion.VERSION_17
                         }
                     }
                 }
-            }
-            tasks.withType(JavaCompile).configureEach {
-                sourceCompatibility = '17'
-                targetCompatibility = '17'
+                tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                    kotlinOptions {
+                        jvmTarget = "17"
+                    }
+                }
             }
         }
         EOF
         
+        # إضافة الخاصية إلى gradle.properties (كحل احتياطي)
+        echo "kotlin.jvm.target.validation.mode = IGNORE" >> gradle.properties
+        # --- انتهاء التعديل التلقائي ---
+        
         chmod +x gradlew
-        ./gradlew assembleDebug -I init.gradle
+        ./gradlew assembleDebug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
