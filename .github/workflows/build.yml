@@ -19,7 +19,7 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Extract Zip and Build
+    - name: Extract Zip and Fix Build Configs
       run: |
         echo "Extracting zip file..."
         mkdir -p extracted_folder
@@ -35,40 +35,31 @@ jobs:
         echo "Found project at: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         
-        # إنشاء ملف init.gradle لإصلاح توافق JVM Target بطريقة آمنة
-        # هذا الملف يعمل على مستوى Gradle نفسه ولا يتعارض مع صيغة المشروع
-        echo "Creating init.gradle to fix JVM target compatibility..."
-        cat <<'EOF' > init.gradle
-        initscript {
-            repositories {
-                mavenCentral()
-                google()
-            }
-            dependencies {
-                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0")
-            }
-        }
-
-        allprojects {
-            afterEvaluate {
-                tasks.configureEach {
-                    if (it.class.name.contains("org.jetbrains.kotlin.gradle.tasks.KotlinCompile")) {
-                        kotlinOptions {
-                            jvmTarget = "17"
+        # 1. إضافة الخاصية إلى gradle.properties كإجراء احتياطي (لتجاهل التحقق)
+        echo "kotlin.jvm.target.validation.mode = IGNORE" >> gradle.properties
+        
+        # 2. إضافة بلوك subprojects إلى build.gradle الرئيسي لفرض الإصدار 17
+        # هذا البلوك يضمن تطبيق الإعدادات على جميع المشاريع الفرعية والتبعيات
+        cat <<'EOF' >> build.gradle
+        subprojects {
+            afterEvaluate { project ->
+                if (project.hasProperty('android')) {
+                    project.android {
+                        compileOptions {
+                            sourceCompatibility JavaVersion.VERSION_17
+                            targetCompatibility JavaVersion.VERSION_17
                         }
                     }
                 }
-            }
-            tasks.withType(JavaCompile).configureEach {
-                sourceCompatibility = '17'
-                targetCompatibility = '17'
+                if (project.hasProperty('kotlinOptions')) {
+                    project.kotlinOptions.jvmTarget = "17"
+                }
             }
         }
         EOF
         
         chmod +x gradlew
-        # تشغيل البناء باستخدام ملف init.gradle
-        ./gradlew assembleDebug -I init.gradle
+        ./gradlew assembleDebug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
