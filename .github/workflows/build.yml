@@ -35,19 +35,12 @@ jobs:
         echo "Found project at: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         
-        # --- بدء التعديل التلقائي على ملفات الإعدادات ---
-        echo "Applying Android Plugin fix..."
-        
-        # 1. إنشاء أو تعديل ملف settings.gradle.kts لإضافة pluginManagement
-        if [ -f "settings.gradle.kts" ]; then
-          # إذا كان الملف موجوداً، نضيف إليه block الإعدادات
-          sed -i '1i pluginManagement {\n    repositories {\n        google()\n        mavenCentral()\n        gradlePluginPortal()\n    }\n}' settings.gradle.kts
-        elif [ -f "settings.gradle" ]; then
-           # إذا كان الملف بصيغة Groovy
-           sed -i '1i pluginManagement {\n    repositories {\n        google()\n        mavenCentral()\n        gradlePluginPortal()\n    }\n}' settings.gradle
-        else
-          # إذا لم يكن موجوداً، ننشئ ملف Kotlin DSL جديد
-          cat <<'EOF' > settings.gradle.kts
+        # --- معالجة ملف settings.gradle.kts بشكل آمن ---
+        echo "Processing settings.gradle.kts safely..."
+        SETTINGS_FILE="settings.gradle.kts"
+        if [ ! -f "$SETTINGS_FILE" ]; then
+          # إنشاء الملف إذا لم يكن موجوداً
+          cat <<'EOF' > "$SETTINGS_FILE"
         pluginManagement {
             repositories {
                 google()
@@ -65,17 +58,29 @@ jobs:
         rootProject.name = "MyApp"
         include(":app")
         EOF
-        fi
-
-        # 2. إضافة إصدار الإضافة في ملف app/build.gradle.kts
-        APP_BUILD_GRADLE="app/build.gradle.kts"
-        if [ -f "$APP_BUILD_GRADLE" ]; then
-          # البحث عن سطر الإضافة وإضافة الإصدار إذا لم يكن موجوداً
-          sed -i 's/id("com.android.application")/id("com.android.application") version "8.7.0"/' "$APP_BUILD_GRADLE"
-          sed -i 's/id("org.jetbrains.kotlin.android")/id("org.jetbrains.kotlin.android") version "1.9.0"/' "$APP_BUILD_GRADLE"
+          echo "Created new $SETTINGS_FILE"
+        else
+          # التحقق مما إذا كان البلوك موجوداً
+          if ! grep -q "pluginManagement" "$SETTINGS_FILE"; then
+            echo "Adding pluginManagement block to the beginning of $SETTINGS_FILE"
+            # استخدام ملف مؤقت لإدراج البلوك في البداية
+            cat <<'EOF' > /tmp/plugin_management_block.txt
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+        EOF
+            cat /tmp/plugin_management_block.txt "$SETTINGS_FILE" > /tmp/settings_temp && mv /tmp/settings_temp "$SETTINGS_FILE"
+          else
+            echo "pluginManagement block already exists. Skipping addition."
+          fi
         fi
         
-        # 3. تطبيق إصلاح توافق JVM (الذي أضفناه سابقاً)
+        # --- إصلاح توافق JVM (لضمان عدم عودة الخطأ القديم) ---
+        echo "Applying JVM target compatibility fix..."
         cat <<'EOF' >> build.gradle.kts
         subprojects {
             afterEvaluate { project ->
@@ -95,7 +100,6 @@ jobs:
             }
         }
         EOF
-        # --- انتهاء التعديل التلقائي ---
         
         chmod +x gradlew
         ./gradlew assembleDebug
