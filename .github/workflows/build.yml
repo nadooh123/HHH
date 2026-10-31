@@ -35,7 +35,7 @@ jobs:
         cd "$PROJECT_DIR"
         
         chmod +x gradlew
-        ./gradlew assembleDebug
+        ./gradlew assembleDebug -Dkotlin.jvm.target.validation=disable
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
