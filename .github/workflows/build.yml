@@ -1,8 +1,10 @@
+
 name: Build APK from Zip
 
 on:
   push:
     branches: [ main, master ]
+  workflow_dispatch: # يسمح لك بتشغيله يدوياً من واجهة GitHub
 
 jobs:
   build:
@@ -12,7 +14,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: set up JDK 17
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
@@ -24,6 +26,7 @@ jobs:
         mkdir -p extracted_folder
         unzip -q "*.zip" -d extracted_folder
         
+        # البحث عن مسار gradlew
         GRADLEW_PATH=$(find extracted_folder -name "gradlew" -type f | head -n 1)
         if [ -z "$GRADLEW_PATH" ]; then
           echo "Error: gradlew not found!"
@@ -34,8 +37,23 @@ jobs:
         echo "Found project at: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         
+        # إنشاء ملف init.gradle لإجبار المشروع على استخدام إصدار 17 لـ Java و Kotlin
+        echo "Creating init.gradle to fix JVM target compatibility..."
+        cat <<EOF > init.gradle
+        allprojects {
+            tasks.withType(JavaCompile).configureEach {
+                sourceCompatibility = '17'
+                targetCompatibility = '17'
+            }
+            tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                kotlinOptions.jvmTarget = '17'
+            }
+        }
+        EOF
+        
         chmod +x gradlew
-        ./gradlew assembleDebug -Dkotlin.jvm.target.validation=disable
+        # تشغيل البناء باستخدام ملف init.gradle
+        ./gradlew assembleDebug -I init.gradle
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
